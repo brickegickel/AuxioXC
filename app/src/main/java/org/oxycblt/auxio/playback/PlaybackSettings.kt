@@ -58,6 +58,12 @@ interface PlaybackSettings : Settings<PlaybackSettings.Listener> {
     val pauseOnRepeat: Boolean
     /** Whether to maintain the play/pause state when skipping or editing the queue */
     val rememberPause: Boolean
+    /** Whether to add a random pause between tracks. */
+    val randomPause: Boolean
+    /** Maximum duration of the random pause in seconds. */
+    val randomPauseDuration: Int
+    /** Whether dynamic fade-in is enabled. */
+    val dynamicFadeIn: Boolean
     /** Whether to always exit when task is removed, even if playing. */
     val exitOnTaskRemoval: Boolean
 
@@ -70,6 +76,12 @@ interface PlaybackSettings : Settings<PlaybackSettings.Listener> {
 
         /** Called when [pauseOnRepeat] has changed. */
         fun onPauseOnRepeatChanged() {}
+
+        /** Called when [randomPause] has changed. */
+        fun onRandomPauseChanged() {}
+
+        /** Called when [dynamicFadeIn] has changed. */
+        fun onDynamicFadeInChanged() {}
     }
 }
 
@@ -133,6 +145,15 @@ class PlaybackSettingsImpl @Inject constructor(@ApplicationContext context: Cont
 
     override val rememberPause: Boolean
         get() = sharedPreferences.getBoolean(getString(R.string.set_key_remember_pause), false)
+
+    override val randomPause: Boolean
+        get() = sharedPreferences.getBoolean(getString(R.string.set_key_random_pause), false)
+
+    override val randomPauseDuration: Int
+        get() = sharedPreferences.getInt(getString(R.string.set_key_random_pause_duration), 10)
+
+    override val dynamicFadeIn: Boolean
+        get() = sharedPreferences.getBoolean(getString(R.string.set_key_dynamic_fade_in), false)
 
     override val exitOnTaskRemoval: Boolean
         get() = sharedPreferences.getBoolean(getString(R.string.set_key_task_exit), false)
@@ -200,6 +221,14 @@ class PlaybackSettingsImpl @Inject constructor(@ApplicationContext context: Cont
             getString(R.string.set_key_repeat_pause) -> {
                 L.d("Dispatching pause on repeat change")
                 listener.onPauseOnRepeatChanged()
+            }
+            getString(R.string.set_key_random_pause) -> {
+                L.d("Dispatching random pause change")
+                listener.onRandomPauseChanged()
+            }
+            getString(R.string.set_key_dynamic_fade_in) -> {
+                L.d("Dispatching dynamic fade-in change")
+                listener.onDynamicFadeInChanged()
             }
         }
     }

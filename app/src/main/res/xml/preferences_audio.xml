@@ -27,6 +27,28 @@
             app:summary="@string/set_remember_pause_desc"
             app:title="@string/set_remember_pause" />
 
+        <SwitchPreferenceCompat
+            app:defaultValue="false"
+            app:key="@string/set_key_random_pause"
+            app:summary="@string/set_random_pause_desc"
+            app:title="@string/set_random_pause" />
+
+        <SeekBarPreference
+            android:defaultValue="10"
+            android:max="60"
+            app:min="1"
+            app:showSeekBarValue="true"
+            app:dependency="@string/set_key_random_pause"
+            app:key="@string/set_key_random_pause_duration"
+            app:summary="@string/set_random_pause_duration_desc"
+            app:title="@string/set_random_pause_duration" />
+
+        <SwitchPreferenceCompat
+            app:defaultValue="false"
+            app:key="@string/set_key_dynamic_fade_in"
+            app:summary="@string/set_dynamic_fade_in_desc"
+            app:title="@string/set_dynamic_fade_in" />
+
     </PreferenceCategory>
 
     <PreferenceCategory android:title="@string/set_replay_gain">

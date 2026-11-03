@@ -1,0 +1,8 @@
+{
+  "name": "Auxio Music Player",
+  "description": "A simple, rational, and elegant local music player ported from Auxio with Material Design 3, customizable tabs, advanced sorting, equalizer, ReplayGain, and playlist management.",
+  "permissions": [],
+  "capabilities": [
+    "MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"
+  ]
+}

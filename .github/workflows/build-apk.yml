@@ -1,0 +1,111 @@
+name: Build Android 13 APK
+
+on:
+  push:
+    branches: [ "**" ]
+  pull_request:
+    branches: [ "**" ]
+  workflow_dispatch:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build:
+    name: Build & Sign Android 13 APK
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 1
+
+      - name: Configure Git FFmpeg Mirror
+        run: |
+          git config --global url."https://github.com/FFmpeg/FFmpeg.git".insteadOf "git://source.ffmpeg.org/ffmpeg.git"
+          git config --global url."https://github.com/FFmpeg/FFmpeg.git".insteadOf "https://git.ffmpeg.org/ffmpeg.git"
+          git config --global url."https://github.com/FFmpeg/FFmpeg.git".insteadOf "http://git.ffmpeg.org/ffmpeg.git"
+          git config --global url."https://github.com/FFmpeg/FFmpeg.git".insteadOf "git://git.ffmpeg.org/ffmpeg.git"
+          git config --global url."https://github.com/FFmpeg/FFmpeg.git".insteadOf "git://git.ffmpeg.org/ffmpeg"
+          git config --global url."https://github.com/FFmpeg/FFmpeg.git".insteadOf "https://git.ffmpeg.org/ffmpeg"
+          git config --global url."https://github.com/FFmpeg/FFmpeg.git".insteadOf "http://git.ffmpeg.org/ffmpeg"
+
+      - name: Clone Submodules
+        run: |
+          git submodule update --init --recursive media musikr/src/main/cpp/taglib
+
+      - name: Install Build Tools
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y ninja-build cmake
+
+      - name: Set up JDK 21
+        uses: actions/setup-java@v4
+        with:
+          java-version: '21'
+          distribution: 'temurin'
+          cache: 'gradle'
+
+      - name: Install Android SDK & NDK Components
+        run: |
+          export ANDROID_HOME=${ANDROID_HOME:-/usr/local/lib/android/sdk}
+          export PATH="${ANDROID_HOME}/cmdline-tools/latest/bin:${ANDROID_HOME}/platform-tools:${PATH}"
+          yes | sdkmanager --licenses || true
+          sdkmanager "cmdline-tools;latest" "platform-tools" "platforms;android-34" "platforms;android-35" "build-tools;35.0.0" "cmake;3.22.1" "ndk;28.2.13676358"
+          echo "ANDROID_HOME=${ANDROID_HOME}" >> $GITHUB_ENV
+          echo "ANDROID_NDK_HOME=${ANDROID_HOME}/ndk/28.2.13676358" >> $GITHUB_ENV
+          echo "NDK_ROOT=${ANDROID_HOME}/ndk/28.2.13676358" >> $GITHUB_ENV
+
+      - name: Make gradlew executable
+        run: chmod +x gradlew
+
+      - name: Build Debug APK
+        run: ./gradlew assembleDebug --stacktrace
+
+      - name: Zipalign & Sign APK for Android 13
+        run: |
+          BUILD_TOOLS="${ANDROID_HOME}/build-tools/35.0.0"
+          ZIPALIGN="${BUILD_TOOLS}/zipalign"
+          APKSIGNER="${BUILD_TOOLS}/apksigner"
+
+          if [ ! -f "$ZIPALIGN" ]; then
+            ZIPALIGN=$(which zipalign)
+          fi
+          if [ ! -f "$APKSIGNER" ]; then
+            APKSIGNER=$(which apksigner)
+          fi
+
+          RAW_APK=$(find app/build/outputs/apk/debug -name "*.apk" | head -n 1)
+          echo "Found raw APK: $RAW_APK"
+
+          # 1. Align the APK with 4-byte boundaries
+          "$ZIPALIGN" -p -f 4 "$RAW_APK" Auxio-Debug-Aligned.apk
+
+          # 2. Use existing debug.keystore or generate one if missing
+          KEYSTORE="debug.keystore"
+          if [ ! -f "$KEYSTORE" ]; then
+            keytool -genkey -v -keystore "$KEYSTORE" -alias androiddebugkey -keyalg RSA -keysize 2048 -validity 10000 -storepass android -keypass android -dname "CN=Android Debug,O=Android,C=US"
+          fi
+
+          # 3. Sign with apksigner (v1, v2, and v3 enabled for Android 13+ compatibility)
+          "$APKSIGNER" sign --ks "$KEYSTORE" \
+            --ks-key-alias androiddebugkey \
+            --ks-pass pass:android \
+            --key-pass pass:android \
+            --v1-signing-enabled true \
+            --v2-signing-enabled true \
+            --v3-signing-enabled true \
+            --out Auxio-Android13-Debug.apk \
+            Auxio-Debug-Aligned.apk
+
+          # 4. Verify signature
+          "$APKSIGNER" verify --verbose Auxio-Android13-Debug.apk
+
+      - name: Upload Debug APK Artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: Auxio-Debug-APK
+          path: Auxio-Android13-Debug.apk
+          if-no-files-found: error

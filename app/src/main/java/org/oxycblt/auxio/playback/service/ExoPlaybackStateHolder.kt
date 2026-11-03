@@ -21,6 +21,7 @@ package org.oxycblt.auxio.playback.service
 import android.content.Context
 import android.content.Intent
 import android.media.audiofx.AudioEffect
+import android.os.PowerManager
 import android.provider.OpenableColumns
 import androidx.annotation.OptIn
 import androidx.media3.common.AudioAttributes
@@ -40,6 +41,7 @@ import androidx.media3.exoplayer.source.MediaSource
 import dagger.hilt.android.qualifiers.ApplicationContext
 import javax.inject.Inject
 import kotlin.math.abs
+import kotlin.random.Random
 import kotlin.time.Duration.Companion.milliseconds
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -89,6 +91,12 @@ class ExoPlaybackStateHolder(
     private var currentSaveJob: Job? = null
     private var openAudioEffectSession = false
 
+    private val playbackJob = Job()
+    private val playbackScope = CoroutineScope(Dispatchers.Main + playbackJob)
+    private var randomPauseWakeLock: PowerManager.WakeLock? = null
+    private var randomPauseJob: Job? = null
+    private var fadeInJob: Job? = null
+
     var sessionOngoing = false
         private set
 
@@ -99,10 +107,15 @@ class ExoPlaybackStateHolder(
         replayGainProcessor.attach()
         playbackSettings.registerListener(this)
         imageSettings.registerListener(this)
+        updatePauseOnRepeat()
     }
 
     fun release() {
         saveJob.cancel()
+        playbackJob.cancel()
+        cancelRandomPause()
+        fadeInJob?.cancel()
+        player.volume = 1.0f
         playbackManager.unregisterStateHolder(this)
         musicRepository.removeUpdateListener(this)
         player.removeListener(this)
@@ -225,10 +238,12 @@ class ExoPlaybackStateHolder(
     }
 
     override fun playing(playing: Boolean) {
+        cancelRandomPause()
         player.playWhenReady = playing
     }
 
     override fun seekTo(positionMs: Long) {
+        cancelRandomPause()
         player.seekTo(positionMs)
         deferSave()
         // Ack handled w/ExoPlayer events
@@ -247,6 +262,7 @@ class ExoPlaybackStateHolder(
     }
 
     override fun newPlayback(command: PlaybackCommand) {
+        cancelRandomPause()
         parent = command.parent
         player.shuffleModeEnabled = command.shuffled
         player.setMediaItems(command.queue.map { it.buildMediaItem() })
@@ -278,6 +294,7 @@ class ExoPlaybackStateHolder(
     }
 
     override fun next() {
+        cancelRandomPause()
         // Replicate the old pseudo-circular queue behavior when no repeat option is implemented.
         // Basically, you can't skip back and wrap around the queue, but you can skip forward and
         // wrap around the queue, albeit playback will be paused.
@@ -302,6 +319,7 @@ class ExoPlaybackStateHolder(
     }
 
     override fun prev() {
+        cancelRandomPause()
         if (playbackSettings.rewindWithPrev) {
             player.seekToPrevious()
         } else if (player.hasPreviousMediaItem()) {
@@ -317,6 +335,7 @@ class ExoPlaybackStateHolder(
     }
 
     override fun goto(index: Int) {
+        cancelRandomPause()
         val indices = player.unscrambleQueueIndices()
         if (indices.isEmpty()) {
             return
@@ -444,6 +463,8 @@ class ExoPlaybackStateHolder(
     }
 
     override fun endSession() {
+        cancelRandomPause()
+        fadeInJob?.cancel()
         // This session has ended, so we need to reset this flag for when the next
         // session starts.
         playbackManager.playing(false)
@@ -458,6 +479,8 @@ class ExoPlaybackStateHolder(
     }
 
     override fun reset(ack: StateAck.NewPlayback) {
+        cancelRandomPause()
+        fadeInJob?.cancel()
         player.setMediaItems(listOf())
         playbackManager.ack(this, ack)
         deferSave()
@@ -490,9 +513,13 @@ class ExoPlaybackStateHolder(
     override fun onPlaybackStateChanged(playbackState: Int) {
         super.onPlaybackStateChanged(playbackState)
 
-        if (playbackState == Player.STATE_ENDED && player.repeatMode == Player.REPEAT_MODE_OFF) {
-            goto(0)
-            player.pause()
+        if (playbackState == Player.STATE_ENDED) {
+            if (playbackSettings.randomPause) {
+                handleRandomPauseAtTrackEnd()
+            } else if (player.repeatMode == Player.REPEAT_MODE_OFF) {
+                goto(0)
+                player.pause()
+            }
         }
     }
 
@@ -503,6 +530,8 @@ class ExoPlaybackStateHolder(
             playbackManager.ack(this, StateAck.IndexMoved)
             deferSave()
         }
+
+        applyDynamicFadeIn(mediaItem)
     }
 
     override fun onEvents(player: Player, events: Player.Events) {
@@ -558,9 +587,132 @@ class ExoPlaybackStateHolder(
         updatePauseOnRepeat()
     }
 
+    override fun onRandomPauseChanged() {
+        super.onRandomPauseChanged()
+        updatePauseOnRepeat()
+        if (!playbackSettings.randomPause) {
+            cancelRandomPause()
+        }
+    }
+
+    override fun onDynamicFadeInChanged() {
+        super.onDynamicFadeInChanged()
+        if (!playbackSettings.dynamicFadeIn) {
+            fadeInJob?.cancel()
+            player.volume = 1.0f
+        }
+    }
+
     private fun updatePauseOnRepeat() {
         player.pauseAtEndOfMediaItems =
-            player.repeatMode == Player.REPEAT_MODE_ONE && playbackSettings.pauseOnRepeat
+            (player.repeatMode == Player.REPEAT_MODE_ONE && playbackSettings.pauseOnRepeat) ||
+                playbackSettings.randomPause
+    }
+
+    private fun handleRandomPauseAtTrackEnd() {
+        val hasNext = player.repeatMode == Player.REPEAT_MODE_ALL || player.hasNextMediaItem()
+        val isRepeatOne = player.repeatMode == Player.REPEAT_MODE_ONE
+
+        if (!hasNext && !isRepeatOne) {
+            goto(0)
+            player.pause()
+            return
+        }
+
+        cancelRandomPause()
+
+        val powerManager = context.getSystemService(Context.POWER_SERVICE) as? PowerManager
+        randomPauseWakeLock =
+            powerManager?.newWakeLock(
+                PowerManager.PARTIAL_WAKE_LOCK,
+                "Auxio:RandomPauseWakeLock",
+            )
+
+        val maxSec = playbackSettings.randomPauseDuration.coerceIn(1, 60)
+        val pauseSec = Random.nextInt(0, maxSec + 1)
+        val pauseMs = pauseSec * 1000L
+
+        L.d("Track ended with random pause: pausing for $pauseSec seconds ($pauseMs ms)")
+        randomPauseWakeLock?.acquire(pauseMs + 3000L)
+
+        randomPauseJob = playbackScope.launch {
+            try {
+                delay(pauseMs)
+                if (sessionOngoing) {
+                    if (player.repeatMode == Player.REPEAT_MODE_ONE) {
+                        player.seekTo(player.currentMediaItemIndex, 0L)
+                        player.play()
+                    } else if (player.repeatMode == Player.REPEAT_MODE_ALL || player.hasNextMediaItem()) {
+                        if (player.hasNextMediaItem()) {
+                            player.seekToNextMediaItem()
+                        } else {
+                            player.seekTo(
+                                player.currentTimeline.getFirstWindowIndex(player.shuffleModeEnabled),
+                                C.TIME_UNSET,
+                            )
+                        }
+                        player.play()
+                        playbackManager.ack(this@ExoPlaybackStateHolder, StateAck.IndexMoved)
+                    }
+                }
+            } finally {
+                randomPauseWakeLock?.let {
+                    if (it.isHeld) {
+                        it.release()
+                    }
+                }
+                randomPauseWakeLock = null
+            }
+        }
+    }
+
+    private fun cancelRandomPause() {
+        randomPauseJob?.cancel()
+        randomPauseJob = null
+        randomPauseWakeLock?.let {
+            if (it.isHeld) {
+                it.release()
+            }
+        }
+        randomPauseWakeLock = null
+    }
+
+    private fun applyDynamicFadeIn(mediaItem: MediaItem?) {
+        fadeInJob?.cancel()
+        if (!playbackSettings.dynamicFadeIn || mediaItem == null) {
+            player.volume = 1.0f
+            return
+        }
+
+        player.volume = 0f
+        val songDuration = mediaItem.song?.durationMs ?: 0L
+        val fadeDurationMs =
+            if (songDuration > 0L) {
+                (songDuration * 0.05).toLong()
+            } else {
+                0L
+            }
+
+        if (fadeDurationMs <= 0L) {
+            player.volume = 1.0f
+            return
+        }
+
+        fadeInJob =
+            playbackScope.launch {
+                val intervalMs = 40L
+                val startTime = System.currentTimeMillis()
+                while (true) {
+                    val elapsed = System.currentTimeMillis() - startTime
+                    val fraction = (elapsed.toFloat() / fadeDurationMs).coerceIn(0f, 1f)
+                    player.volume = fraction
+                    if (fraction >= 1f) {
+                        break
+                    }
+                    delay(intervalMs)
+                }
+                player.volume = 1.0f
+            }
     }
 
     private fun save(cb: () -> Unit) {

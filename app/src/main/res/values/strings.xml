@@ -306,6 +306,14 @@
     <string name="set_repeat_pause_desc">Pause when a song repeats</string>
     <string name="set_remember_pause">Remember pause</string>
     <string name="set_remember_pause_desc">Remain playing/paused when skipping or editing queue</string>
+
+    <string name="set_random_pause">Zufällige Pausen zwischen Tracks</string>
+    <string name="set_random_pause_desc">Fügt eine zufällige Pause ein, bevor der nächste Song startet</string>
+    <string name="set_random_pause_duration">Maximale Pausendauer</string>
+    <string name="set_random_pause_duration_desc">Maximale Pausendauer in Sekunden (1–60s)</string>
+
+    <string name="set_dynamic_fade_in">Dynamisches Fade-In</string>
+    <string name="set_dynamic_fade_in_desc">Blendet die Lautstärke über die ersten 5% des Tracks sanft ein</string>
     <string name="set_replay_gain">Volume normalization</string>
     <string name="set_replay_gain_mode">ReplayGain strategy</string>
     <string name="set_replay_gain_mode_off">Off</string>
