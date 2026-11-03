@@ -89,8 +89,10 @@ tasks.register("assembleTaglib", Exec, {
         commandLine "true"
         return
     }
+    def script = new File("$jniDir/build_taglib.sh")
+    script.setExecutable(true, false)
     def ndkDir = androidComponents.sdkComponents.ndkDirectory.get().asFile
-    commandLine "sh", "-c", "$jniDir/build_taglib.sh $jniDir $ndkDir"
+    commandLine "bash", script.absolutePath, jniDir, ndkDir.absolutePath
 })
 
 afterEvaluate {
