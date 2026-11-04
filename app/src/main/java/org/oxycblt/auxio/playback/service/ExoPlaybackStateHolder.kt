@@ -244,6 +244,13 @@ class ExoPlaybackStateHolder(
 
     override fun seekTo(positionMs: Long) {
         cancelRandomPause()
+        val duration = getCurrentSongDurationMs(player.currentMediaItem)
+        val fadeDurationMs = (duration * 0.05).toLong()
+        if (positionMs >= fadeDurationMs) {
+            fadeInJob?.cancel()
+            fadeInJob = null
+            player.volume = 1.0f
+        }
         player.seekTo(positionMs)
         deferSave()
         // Ack handled w/ExoPlayer events
@@ -263,6 +270,10 @@ class ExoPlaybackStateHolder(
 
     override fun newPlayback(command: PlaybackCommand) {
         cancelRandomPause()
+        fadeInJob?.cancel()
+        if (playbackSettings.dynamicFadeIn) {
+            player.volume = 0f
+        }
         parent = command.parent
         player.shuffleModeEnabled = command.shuffled
         player.setMediaItems(command.queue.map { it.buildMediaItem() })
@@ -295,6 +306,10 @@ class ExoPlaybackStateHolder(
 
     override fun next() {
         cancelRandomPause()
+        fadeInJob?.cancel()
+        if (playbackSettings.dynamicFadeIn) {
+            player.volume = 0f
+        }
         // Replicate the old pseudo-circular queue behavior when no repeat option is implemented.
         // Basically, you can't skip back and wrap around the queue, but you can skip forward and
         // wrap around the queue, albeit playback will be paused.
@@ -320,6 +335,10 @@ class ExoPlaybackStateHolder(
 
     override fun prev() {
         cancelRandomPause()
+        fadeInJob?.cancel()
+        if (playbackSettings.dynamicFadeIn) {
+            player.volume = 0f
+        }
         if (playbackSettings.rewindWithPrev) {
             player.seekToPrevious()
         } else if (player.hasPreviousMediaItem()) {
@@ -336,6 +355,10 @@ class ExoPlaybackStateHolder(
 
     override fun goto(index: Int) {
         cancelRandomPause()
+        fadeInJob?.cancel()
+        if (playbackSettings.dynamicFadeIn) {
+            player.volume = 0f
+        }
         val indices = player.unscrambleQueueIndices()
         if (indices.isEmpty()) {
             return
@@ -514,9 +537,10 @@ class ExoPlaybackStateHolder(
         super.onPlaybackStateChanged(playbackState)
 
         if (playbackState == Player.STATE_ENDED) {
-            if (playbackSettings.randomPause) {
-                handleRandomPauseAtTrackEnd()
-            } else if (player.repeatMode == Player.REPEAT_MODE_OFF) {
+            cancelRandomPause()
+            fadeInJob?.cancel()
+            player.volume = 1.0f
+            if (player.repeatMode == Player.REPEAT_MODE_OFF) {
                 goto(0)
                 player.pause()
             }
@@ -531,7 +555,15 @@ class ExoPlaybackStateHolder(
             deferSave()
         }
 
-        applyDynamicFadeIn(mediaItem)
+        if (
+            (reason == Player.MEDIA_ITEM_TRANSITION_REASON_AUTO ||
+                reason == Player.MEDIA_ITEM_TRANSITION_REASON_REPEAT) &&
+            playbackSettings.randomPause
+        ) {
+            handleRandomPauseBeforeNextTrack(mediaItem)
+        } else {
+            applyDynamicFadeIn(mediaItem)
+        }
     }
 
     override fun onEvents(player: Player, events: Player.Events) {
@@ -592,6 +624,9 @@ class ExoPlaybackStateHolder(
         updatePauseOnRepeat()
         if (!playbackSettings.randomPause) {
             cancelRandomPause()
+            if (player.playbackState == Player.STATE_READY && !player.playWhenReady && sessionOngoing) {
+                player.play()
+            }
         }
     }
 
@@ -599,6 +634,7 @@ class ExoPlaybackStateHolder(
         super.onDynamicFadeInChanged()
         if (!playbackSettings.dynamicFadeIn) {
             fadeInJob?.cancel()
+            fadeInJob = null
             player.volume = 1.0f
         }
     }
@@ -609,109 +645,157 @@ class ExoPlaybackStateHolder(
                 playbackSettings.randomPause
     }
 
-    private fun handleRandomPauseAtTrackEnd() {
-        val hasNext = player.repeatMode == Player.REPEAT_MODE_ALL || player.hasNextMediaItem()
-        val isRepeatOne = player.repeatMode == Player.REPEAT_MODE_ONE
-
-        if (!hasNext && !isRepeatOne) {
-            goto(0)
-            player.pause()
-            return
+    private fun acquireWakeLock(timeoutMs: Long) {
+        try {
+            if (randomPauseWakeLock == null) {
+                val powerManager = context.getSystemService(Context.POWER_SERVICE) as? PowerManager
+                randomPauseWakeLock =
+                    powerManager?.newWakeLock(
+                        PowerManager.PARTIAL_WAKE_LOCK,
+                        "Auxio:RandomPauseWakeLock",
+                    )?.apply {
+                        setReferenceCounted(false)
+                    }
+            }
+            randomPauseWakeLock?.acquire(timeoutMs)
+            L.d("Acquired WakeLock for ${timeoutMs}ms")
+        } catch (e: Exception) {
+            L.e(e, "Failed to acquire WakeLock")
         }
+    }
 
+    private fun releaseWakeLock() {
+        try {
+            randomPauseWakeLock?.let {
+                if (it.isHeld) {
+                    it.release()
+                    L.d("Released WakeLock")
+                }
+            }
+        } catch (e: Exception) {
+            L.e(e, "Failed to release WakeLock")
+        }
+    }
+
+    private fun handleRandomPauseBeforeNextTrack(nextMediaItem: MediaItem?) {
         cancelRandomPause()
+        fadeInJob?.cancel()
 
-        val powerManager = context.getSystemService(Context.POWER_SERVICE) as? PowerManager
-        randomPauseWakeLock =
-            powerManager?.newWakeLock(
-                PowerManager.PARTIAL_WAKE_LOCK,
-                "Auxio:RandomPauseWakeLock",
-            )
+        if (playbackSettings.dynamicFadeIn) {
+            player.volume = 0f
+        }
 
         val maxSec = playbackSettings.randomPauseDuration.coerceIn(1, 60)
         val pauseSec = Random.nextInt(0, maxSec + 1)
         val pauseMs = pauseSec * 1000L
 
-        L.d("Track ended with random pause: pausing for $pauseSec seconds ($pauseMs ms)")
-        randomPauseWakeLock?.acquire(pauseMs + 3000L)
+        L.d("Random pause before next track: $pauseSec seconds ($pauseMs ms)")
 
-        randomPauseJob = playbackScope.launch {
-            try {
-                delay(pauseMs)
-                if (sessionOngoing) {
-                    if (player.repeatMode == Player.REPEAT_MODE_ONE) {
-                        player.seekTo(player.currentMediaItemIndex, 0L)
-                        player.play()
-                    } else if (player.repeatMode == Player.REPEAT_MODE_ALL || player.hasNextMediaItem()) {
-                        if (player.hasNextMediaItem()) {
-                            player.seekToNextMediaItem()
-                        } else {
-                            player.seekTo(
-                                player.currentTimeline.getFirstWindowIndex(player.shuffleModeEnabled),
-                                C.TIME_UNSET,
-                            )
-                        }
-                        player.play()
-                        playbackManager.ack(this@ExoPlaybackStateHolder, StateAck.IndexMoved)
-                    }
-                }
-            } finally {
-                randomPauseWakeLock?.let {
-                    if (it.isHeld) {
-                        it.release()
-                    }
-                }
-                randomPauseWakeLock = null
-            }
+        if (pauseMs > 0L) {
+            acquireWakeLock(pauseMs + 5000L)
         }
+
+        randomPauseJob =
+            playbackScope.launch {
+                try {
+                    if (pauseMs > 0L) {
+                        delay(pauseMs)
+                    }
+                    if (sessionOngoing) {
+                        L.d("Random pause completed, starting next track with play()")
+                        player.play()
+                        applyDynamicFadeIn(nextMediaItem)
+                    }
+                } finally {
+                    releaseWakeLock()
+                    randomPauseJob = null
+                }
+            }
     }
 
     private fun cancelRandomPause() {
         randomPauseJob?.cancel()
         randomPauseJob = null
-        randomPauseWakeLock?.let {
-            if (it.isHeld) {
-                it.release()
-            }
+        releaseWakeLock()
+    }
+
+    private fun getCurrentSongDurationMs(mediaItem: MediaItem?): Long {
+        mediaItem?.mediaMetadata?.extras?.getLong("durationMs")?.takeIf { it > 0 }?.let { return it }
+        mediaItem?.song?.durationMs?.takeIf { it > 0 }?.let { return it }
+        playbackManager.currentSong?.durationMs?.takeIf { it > 0 }?.let { return it }
+        player.currentMediaItem?.song?.durationMs?.takeIf { it > 0 }?.let { return it }
+        val currIdx = player.currentMediaItemIndex
+        if (currIdx in 0 until player.mediaItemCount) {
+            player.getMediaItemAt(currIdx).song?.durationMs?.takeIf { it > 0 }?.let { return it }
         }
-        randomPauseWakeLock = null
+        val exoDuration = player.duration
+        if (exoDuration > 0 && exoDuration != C.TIME_UNSET) {
+            return exoDuration
+        }
+        return 0L
     }
 
     private fun applyDynamicFadeIn(mediaItem: MediaItem?) {
         fadeInJob?.cancel()
-        if (!playbackSettings.dynamicFadeIn || mediaItem == null) {
+        if (!playbackSettings.dynamicFadeIn) {
             player.volume = 1.0f
             return
         }
 
         player.volume = 0f
-        val songDuration = mediaItem.song?.durationMs ?: 0L
-        val fadeDurationMs =
-            if (songDuration > 0L) {
-                (songDuration * 0.05).toLong()
-            } else {
-                0L
-            }
-
-        if (fadeDurationMs <= 0L) {
-            player.volume = 1.0f
-            return
-        }
 
         fadeInJob =
             playbackScope.launch {
+                var durationMs = getCurrentSongDurationMs(mediaItem)
+                var waitCount = 0
+                while (durationMs <= 0L && waitCount < 25) {
+                    delay(40L)
+                    waitCount++
+                    durationMs = getCurrentSongDurationMs(mediaItem)
+                }
+
+                // 5% of track duration (at least 1000ms so fade is clearly audible)
+                val fadeDurationMs =
+                    if (durationMs > 0L) {
+                        (durationMs * 0.05).toLong().coerceAtLeast(1000L)
+                    } else {
+                        3000L
+                    }
+
+                L.d("Starting dynamic fade-in over ${fadeDurationMs}ms (total track duration: ${durationMs}ms)")
+
+                while (!player.playWhenReady || player.playbackState == Player.STATE_BUFFERING) {
+                    player.volume = 0f
+                    delay(40L)
+                }
+
                 val intervalMs = 40L
-                val startTime = System.currentTimeMillis()
+                var elapsedPlaybackMs = 0L
+                var lastTime = System.currentTimeMillis()
+
                 while (true) {
-                    val elapsed = System.currentTimeMillis() - startTime
-                    val fraction = (elapsed.toFloat() / fadeDurationMs).coerceIn(0f, 1f)
+                    val now = System.currentTimeMillis()
+                    val delta = now - lastTime
+                    lastTime = now
+
+                    if (player.playWhenReady && player.playbackState == Player.STATE_READY) {
+                        elapsedPlaybackMs += delta
+                    }
+
+                    val currentPos = player.currentPosition
+                    val effectivePosition =
+                        if (currentPos in 1..fadeDurationMs) currentPos else elapsedPlaybackMs
+                    val fraction = (effectivePosition.toFloat() / fadeDurationMs).coerceIn(0f, 1f)
+
                     player.volume = fraction
-                    if (fraction >= 1f) {
+                    if (fraction >= 1.0f || effectivePosition >= fadeDurationMs) {
                         break
                     }
                     delay(intervalMs)
                 }
+
                 player.volume = 1.0f
+                L.d("Dynamic fade-in complete, player.volume = 1.0f")
             }
     }
 
@@ -744,7 +828,22 @@ class ExoPlaybackStateHolder(
         currentSaveJob = saveScope.launch { block() }
     }
 
-    private fun Song.buildMediaItem() = MediaItem.Builder().setUri(uri).setTag(this).build()
+    private fun Song.buildMediaItem() =
+        MediaItem.Builder()
+            .setUri(uri)
+            .setMediaId(uid.toString())
+            .setTag(this)
+            .setMediaMetadata(
+                androidx.media3.common.MediaMetadata.Builder()
+                    .setTitle(name.raw)
+                    .setExtras(
+                        android.os.Bundle().apply {
+                            putLong("durationMs", durationMs)
+                        }
+                    )
+                    .build()
+            )
+            .build()
 
     private val MediaItem.song: Song?
         get() = this.localConfiguration?.tag as? Song?

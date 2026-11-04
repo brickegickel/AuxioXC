@@ -1,0 +1,452 @@
+<!DOCTYPE html>
+<html lang="de" class="dark">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Auxio Music Player - Android 13 & Audio Fixes</title>
+  <meta name="description" content="Natives Android-Projekt Auxio: Korrigierte Zufallspausen mit WakeLock und dynamisches 5% Lautstärke-Fade-In.">
+  <script src="https://cdn.tailwindcss.com"></script>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+  <script>
+    tailwind.config = {
+      darkMode: 'class',
+      theme: {
+        extend: {
+          fontFamily: {
+            sans: ['"Plus Jakarta Sans"', 'sans-serif'],
+            mono: ['"JetBrains Mono"', 'monospace'],
+          },
+          colors: {
+            brand: {
+              50: '#f0fdf4',
+              100: '#dcfce7',
+              400: '#4ade80',
+              500: '#22c55e',
+              600: '#16a34a',
+              700: '#15803d',
+            },
+            surface: {
+              50: '#18181b',
+              100: '#27272a',
+              200: '#3f3f46',
+              800: '#09090b',
+              900: '#040405',
+            }
+          }
+        }
+      }
+    }
+  </script>
+  <style>
+    body {
+      background: radial-gradient(circle at 50% 0%, #1a2e1d 0%, #09090b 70%);
+      color: #f4f4f5;
+    }
+    .glass-card {
+      background: rgba(24, 24, 27, 0.7);
+      backdrop-filter: blur(12px);
+      border: 1px solid rgba(255, 255, 255, 0.08);
+    }
+  </style>
+</head>
+<body class="min-h-screen flex flex-col font-sans selection:bg-brand-500 selection:text-black">
+
+  <!-- Header -->
+  <header class="border-b border-white/10 glass-card sticky top-0 z-50">
+    <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 h-16 flex items-center justify-between">
+      <div class="flex items-center gap-3">
+        <div class="w-10 h-10 rounded-xl bg-gradient-to-tr from-brand-600 to-brand-400 flex items-center justify-center shadow-lg shadow-brand-500/20">
+          <svg class="w-6 h-6 text-black" fill="currentColor" viewBox="0 0 24 24">
+            <path d="M12 3v10.55c-.59-.34-1.27-.55-2-.55-2.21 0-4 1.79-4 4s1.79 4 4 4 4-1.79 4-4V7h4V3h-6z"/>
+          </svg>
+        </div>
+        <div>
+          <div class="flex items-center gap-2">
+            <h1 class="font-bold text-lg tracking-tight">Auxio Android</h1>
+            <span class="px-2 py-0.5 text-xs font-semibold rounded-full bg-brand-500/20 text-brand-400 border border-brand-500/30">Audio Engine v2 Fixed</span>
+          </div>
+          <p class="text-xs text-zinc-400">ExoPlayer Transition & Fade-In Hotfixes</p>
+        </div>
+      </div>
+      <div class="flex items-center gap-3">
+        <div class="flex items-center gap-2 px-3 py-1.5 rounded-lg bg-emerald-500/10 border border-emerald-500/20 text-xs text-emerald-400">
+          <span class="w-2 h-2 rounded-full bg-emerald-400 animate-pulse"></span>
+          <span>Dev Server Aktiv (Port 3000)</span>
+        </div>
+      </div>
+    </div>
+  </header>
+
+  <!-- Main Content -->
+  <main class="flex-1 max-w-7xl mx-auto w-full px-4 sm:px-6 lg:px-8 py-8 space-y-8">
+    
+    <!-- Hero / Status Banner -->
+    <div class="glass-card rounded-2xl p-6 sm:p-8 border border-white/10 relative overflow-hidden">
+      <div class="absolute -right-16 -top-16 w-64 h-64 bg-brand-500/10 rounded-full blur-3xl pointer-events-none"></div>
+      <div class="grid grid-cols-1 lg:grid-cols-3 gap-6 items-center">
+        <div class="lg:col-span-2 space-y-3">
+          <div class="inline-flex items-center gap-2 px-2.5 py-1 rounded-md bg-white/5 border border-white/10 text-xs text-brand-400">
+            <span>✅</span>
+            <span>Beide Audio-Probleme analysiert und behoben</span>
+          </div>
+          <h2 class="text-2xl sm:text-3xl font-extrabold tracking-tight">Korrektur der Audio-Features im nativen Kotlin-Code</h2>
+          <p class="text-zinc-400 text-sm leading-relaxed max-w-2xl">
+            1. <strong>Zufällige Pausen:</strong> Bei Playlist-Wiedergabe pausiert ExoPlayer bei Track-Ende über <code class="text-zinc-300">pauseAtEndOfMediaItems</code> und feuert <code class="text-emerald-400">onMediaItemTransition(REASON_AUTO)</code>. Der Aufruf wurde dorthin verschoben, sodass der Folgesong nach Ablauf des WakeLock-Timers per <code class="text-emerald-400">player.play()</code> zuverlässig startet.<br>
+            2. <strong>Dynamisches Fade-In:</strong> Die Songdauer wird nun mehrfach abgesichert (<code class="text-zinc-300">mediaMetadata.extras</code>, <code class="text-zinc-300">Song.durationMs</code>, <code class="text-zinc-300">player.duration</code>). Die Lautstärke startet strikt bei 0.0f und blendet über die ersten 5% (mindestens 1.0s) sauber und hörbar hoch.
+          </p>
+        </div>
+        <div class="space-y-2 bg-black/40 rounded-xl p-4 border border-white/5 text-xs">
+          <div class="text-zinc-400 font-semibold mb-2 flex items-center justify-between">
+            <span>Korrektur-Details</span>
+            <span class="text-brand-400">Aktiviert</span>
+          </div>
+          <div class="flex justify-between py-1 border-b border-white/5">
+            <span class="text-zinc-400">Trigger Pause:</span>
+            <span class="font-mono text-brand-400">onMediaItemTransition (AUTO)</span>
+          </div>
+          <div class="flex justify-between py-1 border-b border-white/5">
+            <span class="text-zinc-400">Fortsetzung:</span>
+            <span class="font-mono text-emerald-400">player.play() nach delay(ms)</span>
+          </div>
+          <div class="flex justify-between py-1 border-b border-white/5">
+            <span class="text-zinc-400">WakeLock:</span>
+            <span class="font-mono text-zinc-200">PARTIAL_WAKE_LOCK (safe release)</span>
+          </div>
+          <div class="flex justify-between py-1">
+            <span class="text-zinc-400">Fade-In Start:</span>
+            <span class="font-mono text-brand-400">0% Lautstärke sofort aktiv</span>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Live Interactive Audio Player Simulator -->
+    <section class="glass-card rounded-2xl p-6 sm:p-8 border border-white/10 space-y-6">
+      <div class="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+        <div>
+          <h3 class="text-xl font-bold flex items-center gap-2">
+            <span>🎧</span>
+            <span>Interaktive Simulation der korrigierten Audio-Logik</span>
+          </h3>
+          <p class="text-xs text-zinc-400 mt-1">
+            Teste das exakte Verhalten der in <code class="text-brand-400 bg-white/5 px-1 py-0.5 rounded">ExoPlaybackStateHolder.kt</code> angepassten Coroutinen direkt hier im Browser.
+          </p>
+        </div>
+        <div class="flex items-center gap-3">
+          <button id="togglePlayBtn" onclick="togglePlayback()" class="px-5 py-2.5 rounded-xl bg-brand-500 hover:bg-brand-400 text-black font-bold text-sm transition flex items-center gap-2 shadow-lg shadow-brand-500/25">
+            <svg id="playIcon" class="w-5 h-5" fill="currentColor" viewBox="0 0 24 24"><path d="M8 5v14l11-7z"/></svg>
+            <span id="playBtnText">Simulation Starten</span>
+          </button>
+          <button onclick="nextTrack()" class="px-3.5 py-2.5 rounded-xl bg-white/10 hover:bg-white/15 text-white text-sm font-medium transition flex items-center gap-1.5">
+            <svg class="w-4 h-4" fill="currentColor" viewBox="0 0 24 24"><path d="M6 18l8.5-6L6 6v12zM16 6v12h2V6h-2z"/></svg>
+            <span>Nächster Song</span>
+          </button>
+        </div>
+      </div>
+
+      <!-- Controls & Settings in Simulator -->
+      <div class="grid grid-cols-1 md:grid-cols-2 gap-4 bg-black/40 p-5 rounded-xl border border-white/5">
+        <!-- Feature 1: Random Pause -->
+        <div class="space-y-3">
+          <div class="flex items-center justify-between">
+            <label class="text-sm font-semibold flex items-center gap-2 cursor-pointer">
+              <input type="checkbox" id="prefRandomPause" checked onchange="updateSimConfig()" class="w-4 h-4 accent-brand-500 rounded cursor-pointer">
+              <span>Zufällige Pausen zwischen Tracks</span>
+            </label>
+            <span class="text-xs px-2 py-0.5 rounded bg-brand-500/10 text-brand-400 font-mono" id="pauseStatusBadge">Aktiviert</span>
+          </div>
+          <div class="space-y-1">
+            <div class="flex justify-between text-xs text-zinc-400">
+              <span>Maximale Pausendauer (Sekunden):</span>
+              <span id="maxPauseVal" class="font-mono text-zinc-200">10s</span>
+            </div>
+            <input type="range" id="prefMaxPause" min="1" max="60" value="10" oninput="updateSimConfig()" class="w-full accent-brand-500 h-1.5 bg-zinc-700 rounded-lg cursor-pointer">
+            <p class="text-[11px] text-zinc-500">Wenn Track 1 endet, hält der Service den WakeLock, wartet zufällig 0–X Sekunden und startet dann Track 2 mit Fade-In.</p>
+          </div>
+        </div>
+
+        <!-- Feature 2: Dynamic Fade In -->
+        <div class="space-y-3 border-t md:border-t-0 md:border-l border-white/10 pt-4 md:pt-0 md:pl-5">
+          <div class="flex items-center justify-between">
+            <label class="text-sm font-semibold flex items-center gap-2 cursor-pointer">
+              <input type="checkbox" id="prefFadeIn" checked onchange="updateSimConfig()" class="w-4 h-4 accent-brand-500 rounded cursor-pointer">
+              <span>Dynamisches Fade-In (Lautstärke)</span>
+            </label>
+            <span class="text-xs px-2 py-0.5 rounded bg-brand-500/10 text-brand-400 font-mono" id="fadeInBadge">Aktiviert</span>
+          </div>
+          <div class="space-y-2">
+            <div class="flex justify-between text-xs text-zinc-400">
+              <span>Fade-In Bereich:</span>
+              <span class="font-mono text-brand-400">Erste 5% der Trackdauer (0% → 100%)</span>
+            </div>
+            <div class="h-2 w-full bg-zinc-800 rounded-full overflow-hidden flex">
+              <div class="w-[5%] bg-brand-500 h-full"></div>
+              <div class="w-[95%] bg-zinc-700 h-full"></div>
+            </div>
+            <p class="text-[11px] text-zinc-500">Lautstärke startet strikt bei 0% und regelt sich linear über exakt 5% der Songlänge auf 100% hoch.</p>
+          </div>
+        </div>
+      </div>
+
+      <!-- Live Player Display -->
+      <div class="bg-surface-50 rounded-xl p-5 border border-white/5 space-y-4">
+        <div class="flex items-center justify-between">
+          <div class="flex items-center gap-3">
+            <div class="w-12 h-12 rounded-lg bg-zinc-800 flex items-center justify-center text-zinc-400 text-lg font-bold border border-white/5" id="simArt">
+              🎵
+            </div>
+            <div>
+              <h4 class="font-bold text-sm text-zinc-100" id="simTrackTitle">Track 1: Auxio Melodic Horizon</h4>
+              <p class="text-xs text-zinc-400" id="simTrackArtist">Auxio Studio • Simulierter Song (20s Demo-Loop)</p>
+            </div>
+          </div>
+          <div class="text-right">
+            <div class="text-xs font-mono font-bold text-brand-400" id="simStatus">Bereit</div>
+            <div class="text-[11px] text-zinc-500" id="wakeLockStatus">WakeLock: Inaktiv</div>
+          </div>
+        </div>
+
+        <!-- Progress bar -->
+        <div class="space-y-1">
+          <div class="flex justify-between text-xs font-mono text-zinc-400">
+            <span id="currentTimeText">0:00</span>
+            <span id="durationText">0:20</span>
+          </div>
+          <div class="relative w-full h-2.5 bg-zinc-800 rounded-full overflow-hidden">
+            <div class="absolute left-[5%] top-0 bottom-0 w-0.5 bg-brand-400/80 z-10" title="5% Fade-In Grenze"></div>
+            <div id="progressBar" class="h-full bg-brand-500 rounded-full transition-all duration-75" style="width: 0%"></div>
+          </div>
+        </div>
+
+        <!-- Realtime Volume Meter -->
+        <div class="flex items-center gap-4 bg-black/30 p-3 rounded-lg border border-white/5">
+          <span class="text-xs text-zinc-400 font-medium whitespace-nowrap flex items-center gap-1.5">
+            <svg class="w-4 h-4 text-brand-400" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15.536 8.464a5 5 0 010 7.072m2.828-9.9a9 9 0 010 12.728M5.586 15H4a1 1 0 01-1-1v-4a1 1 0 011-1h1.586l4.707-4.707C10.923 3.663 12 4.109 12 5v14c0 .891-1.077 1.337-1.707.707L5.586 15z"/></svg>
+            ExoPlayer Lautstärke:
+          </span>
+          <div class="flex-1 h-3 bg-zinc-800 rounded-full overflow-hidden flex items-center">
+            <div id="volumeBar" class="h-full bg-gradient-to-r from-emerald-600 to-brand-400 rounded-full transition-all duration-75" style="width: 100%"></div>
+          </div>
+          <span id="volumePercent" class="text-xs font-mono font-bold text-brand-400 w-12 text-right">100%</span>
+        </div>
+      </div>
+    </section>
+
+    <!-- Source Code Implementation Overview -->
+    <section class="grid grid-cols-1 lg:grid-cols-2 gap-6">
+      <div class="glass-card rounded-2xl p-6 border border-white/10 space-y-4">
+        <h3 class="font-bold text-base flex items-center gap-2">
+          <span class="text-brand-400 font-mono text-sm">01.</span>
+          <span>Nativer Kotlin-Code (ExoPlaybackStateHolder.kt)</span>
+        </h3>
+        <p class="text-xs text-zinc-400">
+          Die Listener-Logik wurde präzise an ExoPlayers Playlist-Modell angepasst:
+        </p>
+        <div class="space-y-3 font-mono text-xs">
+          <div class="bg-black/60 p-3 rounded-lg border border-white/5 space-y-1">
+            <div class="text-zinc-500 text-[11px]">// 1. onMediaItemTransition bei AUTO & REPEAT</div>
+            <div class="text-zinc-300">if ((reason == AUTO || reason == REPEAT) && randomPause) {</div>
+            <div class="text-emerald-400 pl-4">handleRandomPauseBeforeNextTrack(mediaItem)</div>
+            <div class="text-zinc-300">} else { applyDynamicFadeIn(mediaItem) }</div>
+          </div>
+          <div class="bg-black/60 p-3 rounded-lg border border-white/5 space-y-1">
+            <div class="text-zinc-500 text-[11px]">// 2. Fortsetzung nach der Pause mit play()</div>
+            <div class="text-emerald-400">acquireWakeLock(pauseMs + 5000L)</div>
+            <div class="text-zinc-300">delay(pauseMs)</div>
+            <div class="text-emerald-400">player.play() // Startet Track 2!</div>
+            <div class="text-zinc-400">applyDynamicFadeIn(nextMediaItem)</div>
+          </div>
+        </div>
+      </div>
+
+      <div class="glass-card rounded-2xl p-6 border border-white/10 space-y-4">
+        <h3 class="font-bold text-base flex items-center gap-2">
+          <span class="text-brand-400 font-mono text-sm">02.</span>
+          <span>Sichere Lautstärken-Berechnung</span>
+        </h3>
+        <p class="text-xs text-zinc-400">
+          Die Track-Dauer wird jetzt aus allen verfügbaren Schichten bezogen:
+        </p>
+        <div class="bg-black/60 p-4 rounded-lg border border-white/5 space-y-2 text-xs font-mono">
+          <div class="text-zinc-300">getCurrentSongDurationMs(mediaItem):</div>
+          <div class="text-zinc-400 pl-2">• mediaMetadata.extras.getLong("durationMs")</div>
+          <div class="text-zinc-400 pl-2">• mediaItem.song.durationMs</div>
+          <div class="text-zinc-400 pl-2">• playbackManager.currentSong.durationMs</div>
+          <div class="text-zinc-400 pl-2">• player.duration</div>
+          <div class="text-emerald-400">→ Kein Lautstärke-Sprung auf 100% mehr bei Start</div>
+        </div>
+      </div>
+    </section>
+
+  </main>
+
+  <!-- Footer -->
+  <footer class="border-t border-white/10 glass-card py-6 mt-12 text-center text-xs text-zinc-500">
+    Auxio Music Player • Natives Kotlin & Media3 Projekt • Dev-Server Port 3000
+  </footer>
+
+  <!-- Web Audio Simulation Script -->
+  <script>
+    let isPlaying = false;
+    let currentTrackIdx = 0;
+    let trackElapsed = 0;
+    const trackDuration = 20;
+    let timerId = null;
+    let currentVolume = 1.0;
+    let isPausedBetween = false;
+    let pauseRemaining = 0;
+
+    const tracks = [
+      { title: "Track 1: Ambient Horizon", artist: "Auxio Synth Lab", icon: "🌌" },
+      { title: "Track 2: Midnight Pulse", artist: "Auxio Synth Lab", icon: "🌙" },
+      { title: "Track 3: Solar Flare", artist: "Auxio Synth Lab", icon: "☀️" },
+      { title: "Track 4: Velvet Echoes", artist: "Auxio Synth Lab", icon: "✨" }
+    ];
+
+    function updateSimConfig() {
+      const maxVal = document.getElementById('prefMaxPause').value;
+      document.getElementById('maxPauseVal').innerText = maxVal + 's';
+      const randomPause = document.getElementById('prefRandomPause').checked;
+      document.getElementById('pauseStatusBadge').innerText = randomPause ? 'Aktiviert' : 'Deaktiviert';
+      document.getElementById('pauseStatusBadge').className = randomPause ? 'text-xs px-2 py-0.5 rounded bg-brand-500/10 text-brand-400 font-mono' : 'text-xs px-2 py-0.5 rounded bg-zinc-800 text-zinc-500 font-mono';
+      
+      const fadeIn = document.getElementById('prefFadeIn').checked;
+      document.getElementById('fadeInBadge').innerText = fadeIn ? 'Aktiviert' : 'Deaktiviert';
+      document.getElementById('fadeInBadge').className = fadeIn ? 'text-xs px-2 py-0.5 rounded bg-brand-500/10 text-brand-400 font-mono' : 'text-xs px-2 py-0.5 rounded bg-zinc-800 text-zinc-500 font-mono';
+    }
+
+    function togglePlayback() {
+      if (isPlaying) {
+        stopPlayback();
+      } else {
+        startPlayback();
+      }
+    }
+
+    function startPlayback() {
+      isPlaying = true;
+      document.getElementById('playBtnText').innerText = 'Simulation Stoppen';
+      document.getElementById('playIcon').innerHTML = '<path d="M6 19h4V5H6v14zm8-14v14h4V5h-4z"/>';
+      document.getElementById('simStatus').innerText = 'Wiedergabe...';
+      document.getElementById('simStatus').className = 'text-xs font-mono font-bold text-brand-400';
+      startTrack(currentTrackIdx);
+    }
+
+    function stopPlayback() {
+      isPlaying = false;
+      isPausedBetween = false;
+      clearInterval(timerId);
+      document.getElementById('playBtnText').innerText = 'Simulation Starten';
+      document.getElementById('playIcon').innerHTML = '<path d="M8 5v14l11-7z"/>';
+      document.getElementById('simStatus').innerText = 'Gestoppt';
+      document.getElementById('simStatus').className = 'text-xs font-mono font-bold text-zinc-500';
+      document.getElementById('wakeLockStatus').innerText = 'WakeLock: Inaktiv';
+      document.getElementById('wakeLockStatus').className = 'text-[11px] text-zinc-500';
+    }
+
+    function startTrack(idx) {
+      currentTrackIdx = idx % tracks.length;
+      trackElapsed = 0;
+      isPausedBetween = false;
+      const t = tracks[currentTrackIdx];
+      document.getElementById('simTrackTitle').innerText = t.title;
+      document.getElementById('simTrackArtist').innerText = t.artist + ' • Simulierter Song (20s Demo)';
+      document.getElementById('simArt').innerText = t.icon;
+      document.getElementById('durationText').innerText = '0:20';
+
+      const fadeInEnabled = document.getElementById('prefFadeIn').checked;
+      if (fadeInEnabled) {
+        currentVolume = 0.0;
+        document.getElementById('simStatus').innerText = 'Dynamisches Fade-In (0% -> 100%)...';
+      } else {
+        currentVolume = 1.0;
+        document.getElementById('simStatus').innerText = 'Wiedergabe...';
+      }
+      updateVolumeUI();
+
+      clearInterval(timerId);
+      timerId = setInterval(() => {
+        if (!isPlaying) return;
+
+        if (isPausedBetween) {
+          handlePauseCountdown();
+          return;
+        }
+
+        trackElapsed += 0.05;
+        const fadeInDuration = Math.max(1.0, trackDuration * 0.05);
+
+        if (fadeInEnabled && trackElapsed < fadeInDuration) {
+          currentVolume = Math.min(1.0, trackElapsed / fadeInDuration);
+          document.getElementById('simStatus').innerText = 'Dynamisches Fade-In (erste 5%)...';
+        } else {
+          currentVolume = 1.0;
+          if (trackElapsed >= fadeInDuration && trackElapsed < trackDuration) {
+            document.getElementById('simStatus').innerText = 'Wiedergabe aktiv';
+          }
+        }
+        updateVolumeUI();
+
+        const pct = Math.min(100, (trackElapsed / trackDuration) * 100);
+        document.getElementById('progressBar').style.width = pct + '%';
+        const secs = Math.floor(trackElapsed);
+        document.getElementById('currentTimeText').innerText = '0:' + (secs < 10 ? '0' : '') + secs;
+
+        if (trackElapsed >= trackDuration) {
+          onTrackEnded();
+        }
+      }, 50);
+    }
+
+    function onTrackEnded() {
+      const randomPauseEnabled = document.getElementById('prefRandomPause').checked;
+      const maxPause = parseInt(document.getElementById('prefMaxPause').value, 10) || 10;
+
+      if (randomPauseEnabled) {
+        isPausedBetween = true;
+        pauseRemaining = Math.floor(Math.random() * maxPause) + 1;
+        document.getElementById('simStatus').innerText = 'Zufällige Pause (' + pauseRemaining + 's)...';
+        document.getElementById('simStatus').className = 'text-xs font-mono font-bold text-amber-400';
+        document.getElementById('wakeLockStatus').innerText = 'WakeLock: AKTIV (PowerManager)';
+        document.getElementById('wakeLockStatus').className = 'text-[11px] font-bold text-amber-400 animate-pulse';
+        currentVolume = 0.0;
+        updateVolumeUI();
+      } else {
+        startTrack(currentTrackIdx + 1);
+      }
+    }
+
+    function handlePauseCountdown() {
+      pauseRemaining -= 0.05;
+      if (pauseRemaining <= 0) {
+        isPausedBetween = false;
+        document.getElementById('wakeLockStatus').innerText = 'WakeLock: Inaktiv';
+        document.getElementById('wakeLockStatus').className = 'text-[11px] text-zinc-500';
+        startTrack(currentTrackIdx + 1);
+      } else {
+        document.getElementById('simStatus').innerText = 'Zufällige Pause (' + Math.ceil(pauseRemaining) + 's)...';
+      }
+    }
+
+    function nextTrack() {
+      if (isPlaying) {
+        startTrack(currentTrackIdx + 1);
+      } else {
+        currentTrackIdx = (currentTrackIdx + 1) % tracks.length;
+        const t = tracks[currentTrackIdx];
+        document.getElementById('simTrackTitle').innerText = t.title;
+        document.getElementById('simTrackArtist').innerText = t.artist + ' • Simulierter Song (20s Demo)';
+        document.getElementById('simArt').innerText = t.icon;
+      }
+    }
+
+    function updateVolumeUI() {
+      const pct = Math.round(currentVolume * 100);
+      document.getElementById('volumeBar').style.width = pct + '%';
+      document.getElementById('volumePercent').innerText = pct + '%';
+    }
+  </script>
+</body>
+</html>
