@@ -562,7 +562,7 @@ class ExoPlaybackStateHolder(
         ) {
             handleRandomPauseBeforeNextTrack(mediaItem)
         } else {
-            applyDynamicFadeIn(mediaItem)
+            startDynamicFadeIn(mediaItem)
         }
     }
 
@@ -624,7 +624,7 @@ class ExoPlaybackStateHolder(
         updatePauseOnRepeat()
         if (!playbackSettings.randomPause) {
             cancelRandomPause()
-            if (player.playbackState == Player.STATE_READY && !player.playWhenReady && sessionOngoing) {
+            if (!player.playWhenReady && sessionOngoing) {
                 player.play()
             }
         }
@@ -641,8 +641,7 @@ class ExoPlaybackStateHolder(
 
     private fun updatePauseOnRepeat() {
         player.pauseAtEndOfMediaItems =
-            (player.repeatMode == Player.REPEAT_MODE_ONE && playbackSettings.pauseOnRepeat) ||
-                playbackSettings.randomPause
+            player.repeatMode == Player.REPEAT_MODE_ONE && playbackSettings.pauseOnRepeat
     }
 
     private fun acquireWakeLock(timeoutMs: Long) {
@@ -692,25 +691,26 @@ class ExoPlaybackStateHolder(
         L.d("Random pause before next track: $pauseSec seconds ($pauseMs ms)")
 
         if (pauseMs > 0L) {
+            player.pause()
             acquireWakeLock(pauseMs + 5000L)
-        }
-
-        randomPauseJob =
-            playbackScope.launch {
-                try {
-                    if (pauseMs > 0L) {
+            randomPauseJob =
+                playbackScope.launch {
+                    try {
                         delay(pauseMs)
+                        if (sessionOngoing) {
+                            L.d("Random pause completed, starting next track with play()")
+                            player.play()
+                            startDynamicFadeIn(nextMediaItem)
+                        }
+                    } finally {
+                        releaseWakeLock()
+                        randomPauseJob = null
                     }
-                    if (sessionOngoing) {
-                        L.d("Random pause completed, starting next track with play()")
-                        player.play()
-                        applyDynamicFadeIn(nextMediaItem)
-                    }
-                } finally {
-                    releaseWakeLock()
-                    randomPauseJob = null
                 }
-            }
+        } else {
+            L.d("Random pause selected 0s, starting next track immediately")
+            startDynamicFadeIn(nextMediaItem)
+        }
     }
 
     private fun cancelRandomPause() {
@@ -724,6 +724,7 @@ class ExoPlaybackStateHolder(
         mediaItem?.song?.durationMs?.takeIf { it > 0 }?.let { return it }
         playbackManager.currentSong?.durationMs?.takeIf { it > 0 }?.let { return it }
         player.currentMediaItem?.song?.durationMs?.takeIf { it > 0 }?.let { return it }
+        player.currentMediaItem?.mediaMetadata?.extras?.getLong("durationMs")?.takeIf { it > 0 }?.let { return it }
         val currIdx = player.currentMediaItemIndex
         if (currIdx in 0 until player.mediaItemCount) {
             player.getMediaItemAt(currIdx).song?.durationMs?.takeIf { it > 0 }?.let { return it }
@@ -735,7 +736,7 @@ class ExoPlaybackStateHolder(
         return 0L
     }
 
-    private fun applyDynamicFadeIn(mediaItem: MediaItem?) {
+    private fun startDynamicFadeIn(mediaItem: MediaItem?) {
         fadeInJob?.cancel()
         if (!playbackSettings.dynamicFadeIn) {
             player.volume = 1.0f
@@ -754,17 +755,18 @@ class ExoPlaybackStateHolder(
                     durationMs = getCurrentSongDurationMs(mediaItem)
                 }
 
-                // 5% of track duration (at least 1000ms so fade is clearly audible)
+                // 5% of track duration (at least 1500ms so fade is clearly audible)
                 val fadeDurationMs =
                     if (durationMs > 0L) {
-                        (durationMs * 0.05).toLong().coerceAtLeast(1000L)
+                        (durationMs * 0.05).toLong().coerceAtLeast(1500L)
                     } else {
                         3000L
                     }
 
                 L.d("Starting dynamic fade-in over ${fadeDurationMs}ms (total track duration: ${durationMs}ms)")
 
-                while (!player.playWhenReady || player.playbackState == Player.STATE_BUFFERING) {
+                // Wait until audio is actually being played
+                while (!player.isPlaying && sessionOngoing) {
                     player.volume = 0f
                     delay(40L)
                 }
@@ -773,12 +775,12 @@ class ExoPlaybackStateHolder(
                 var elapsedPlaybackMs = 0L
                 var lastTime = System.currentTimeMillis()
 
-                while (true) {
+                while (sessionOngoing) {
                     val now = System.currentTimeMillis()
                     val delta = now - lastTime
                     lastTime = now
 
-                    if (player.playWhenReady && player.playbackState == Player.STATE_READY) {
+                    if (player.isPlaying) {
                         elapsedPlaybackMs += delta
                     }
 
