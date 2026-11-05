@@ -526,11 +526,25 @@ class ExoPlaybackStateHolder(
                 broadcastAudioEffectAction(AudioEffect.ACTION_OPEN_AUDIO_EFFECT_CONTROL_SESSION)
                 openAudioEffectSession = true
             }
-        } else if (openAudioEffectSession) {
-            // Make sure to close the audio session when we stop playback.
-            L.d("Closing audio effect session")
-            broadcastAudioEffectAction(AudioEffect.ACTION_CLOSE_AUDIO_EFFECT_CONTROL_SESSION)
-            openAudioEffectSession = false
+        } else {
+            if (openAudioEffectSession) {
+                // Make sure to close the audio session when we stop playback.
+                L.d("Closing audio effect session")
+                broadcastAudioEffectAction(AudioEffect.ACTION_CLOSE_AUDIO_EFFECT_CONTROL_SESSION)
+                openAudioEffectSession = false
+            }
+
+            if (reason == Player.PLAY_WHEN_READY_CHANGE_REASON_END_OF_MEDIA_ITEM) {
+                L.d("Player paused at end of media item (pauseAtEndOfMediaItems)")
+                val hasNext =
+                    player.hasNextMediaItem() ||
+                        player.repeatMode == Player.REPEAT_MODE_ALL ||
+                        player.repeatMode == Player.REPEAT_MODE_ONE
+
+                if (hasNext && playbackSettings.randomPause) {
+                    handleRandomPauseAtEndOfTrack()
+                }
+            }
         }
     }
 
