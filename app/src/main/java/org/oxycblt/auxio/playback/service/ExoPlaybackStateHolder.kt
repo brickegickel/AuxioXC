@@ -246,8 +246,9 @@ class ExoPlaybackStateHolder(
     override fun seekTo(positionMs: Long) {
         cancelRandomPause()
         val duration = getCurrentSongDurationMs(player.currentMediaItem)
-        val fadeDurationMs = (duration * 0.05).toLong()
-        if (positionMs >= fadeDurationMs) {
+        val percent = playbackSettings.dynamicFadeInPercent.coerceIn(0, 100)
+        val fadeDurationMs = (duration * (percent / 100.0)).toLong()
+        if (positionMs >= fadeDurationMs || percent <= 0 || !playbackSettings.dynamicFadeIn) {
             fadeInJob?.cancel()
             fadeInJob = null
             player.volume = 1.0f
@@ -715,7 +716,7 @@ class ExoPlaybackStateHolder(
             player.volume = 0f
         }
 
-        val maxSec = playbackSettings.randomPauseDuration.coerceIn(1, 60)
+        val maxSec = playbackSettings.randomPauseDuration.coerceIn(1, 240)
         val pauseSec = Random.nextInt(0, maxSec + 1)
         val pauseMs = pauseSec * 1000L
 
@@ -787,7 +788,8 @@ class ExoPlaybackStateHolder(
 
     private fun startDynamicFadeIn(mediaItem: MediaItem?) {
         fadeInJob?.cancel()
-        if (!playbackSettings.dynamicFadeIn) {
+        val percent = playbackSettings.dynamicFadeInPercent.coerceIn(0, 100)
+        if (!playbackSettings.dynamicFadeIn || percent <= 0) {
             player.volume = 1.0f
             return
         }
@@ -804,15 +806,15 @@ class ExoPlaybackStateHolder(
                     durationMs = getCurrentSongDurationMs(mediaItem)
                 }
 
-                // 5% of track duration (at least 1500ms so fade is clearly audible)
+                // Configurable percentage of track duration (0% to 100%)
                 val fadeDurationMs =
                     if (durationMs > 0L) {
-                        (durationMs * 0.05).toLong().coerceAtLeast(1500L)
+                        (durationMs * (percent / 100.0)).toLong().coerceIn(500L, durationMs)
                     } else {
-                        3000L
+                        (3000L * (percent / 100.0)).toLong().coerceAtLeast(500L)
                     }
 
-                L.d("Starting dynamic fade-in over ${fadeDurationMs}ms (total track duration: ${durationMs}ms)")
+                L.d("Starting dynamic fade-in over ${fadeDurationMs}ms ($percent% of track duration: ${durationMs}ms)")
 
                 // Wait until audio is actually being played (up to 4 seconds)
                 var waitPlayCount = 0

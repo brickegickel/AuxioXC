@@ -64,6 +64,8 @@ interface PlaybackSettings : Settings<PlaybackSettings.Listener> {
     val randomPauseDuration: Int
     /** Whether dynamic fade-in is enabled. */
     val dynamicFadeIn: Boolean
+    /** Percentage of track duration for dynamic fade-in (0 to 100). */
+    val dynamicFadeInPercent: Int
     /** Whether to always exit when task is removed, even if playing. */
     val exitOnTaskRemoval: Boolean
 
@@ -153,7 +155,12 @@ class PlaybackSettingsImpl @Inject constructor(@ApplicationContext context: Cont
         get() = sharedPreferences.getInt(getString(R.string.set_key_random_pause_duration), 10)
 
     override val dynamicFadeIn: Boolean
-        get() = sharedPreferences.getBoolean(getString(R.string.set_key_dynamic_fade_in), false)
+        get() =
+            sharedPreferences.getBoolean(getString(R.string.set_key_dynamic_fade_in), false) &&
+                dynamicFadeInPercent > 0
+
+    override val dynamicFadeInPercent: Int
+        get() = sharedPreferences.getInt(getString(R.string.set_key_dynamic_fade_in_percent), 5).coerceIn(0, 100)
 
     override val exitOnTaskRemoval: Boolean
         get() = sharedPreferences.getBoolean(getString(R.string.set_key_task_exit), false)
@@ -226,8 +233,15 @@ class PlaybackSettingsImpl @Inject constructor(@ApplicationContext context: Cont
                 L.d("Dispatching random pause change")
                 listener.onRandomPauseChanged()
             }
-            getString(R.string.set_key_dynamic_fade_in) -> {
+            getString(R.string.set_key_dynamic_fade_in),
+            getString(R.string.set_key_dynamic_fade_in_percent) -> {
                 L.d("Dispatching dynamic fade-in change")
+                val percent = sharedPreferences.getInt(getString(R.string.set_key_dynamic_fade_in_percent), 5)
+                if (percent == 0 && sharedPreferences.getBoolean(getString(R.string.set_key_dynamic_fade_in), false)) {
+                    sharedPreferences.edit {
+                        putBoolean(getString(R.string.set_key_dynamic_fade_in), false)
+                    }
+                }
                 listener.onDynamicFadeInChanged()
             }
         }

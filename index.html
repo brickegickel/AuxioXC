@@ -162,8 +162,8 @@
               <span>Maximale Pausendauer (Sekunden):</span>
               <span id="maxPauseVal" class="font-mono text-zinc-200">10s</span>
             </div>
-            <input type="range" id="prefMaxPause" min="1" max="60" value="10" oninput="updateSimConfig()" class="w-full accent-brand-500 h-1.5 bg-zinc-700 rounded-lg cursor-pointer">
-            <p class="text-[11px] text-zinc-500">Wenn Track 1 endet, hält der Service den WakeLock, wartet zufällig 0–X Sekunden und startet dann Track 2 mit Fade-In.</p>
+            <input type="range" id="prefMaxPause" min="1" max="240" value="10" oninput="updateSimConfig()" class="w-full accent-brand-500 h-1.5 bg-zinc-700 rounded-lg cursor-pointer">
+            <p class="text-[11px] text-zinc-500">Wenn Track 1 endet, hält der Service den WakeLock, wartet zufällig 0–X Sekunden (1–240s) und startet dann Track 2.</p>
           </div>
         </div>
 
@@ -178,14 +178,11 @@
           </div>
           <div class="space-y-2">
             <div class="flex justify-between text-xs text-zinc-400">
-              <span>Fade-In Bereich:</span>
-              <span class="font-mono text-brand-400">Erste 5% der Trackdauer (0% → 100%)</span>
+              <span>Fade-In Prozent:</span>
+              <span id="fadeInPctVal" class="font-mono text-brand-400">5% der Trackdauer</span>
             </div>
-            <div class="h-2 w-full bg-zinc-800 rounded-full overflow-hidden flex">
-              <div class="w-[5%] bg-brand-500 h-full"></div>
-              <div class="w-[95%] bg-zinc-700 h-full"></div>
-            </div>
-            <p class="text-[11px] text-zinc-500">Lautstärke startet strikt bei 0% und regelt sich linear über exakt 5% der Songlänge auf 100% hoch.</p>
+            <input type="range" id="prefFadeInPct" min="0" max="100" value="5" oninput="updateFadeInPctConfig()" class="w-full accent-brand-500 h-1.5 bg-zinc-700 rounded-lg cursor-pointer">
+            <p class="text-[11px] text-zinc-500">Einstellbar von 0% bis 100%. 0% deaktiviert das Fade-In sofort (Lautstärke startet direkt bei 100%).</p>
           </div>
         </div>
       </div>
@@ -313,8 +310,20 @@
       document.getElementById('pauseStatusBadge').className = randomPause ? 'text-xs px-2 py-0.5 rounded bg-brand-500/10 text-brand-400 font-mono' : 'text-xs px-2 py-0.5 rounded bg-zinc-800 text-zinc-500 font-mono';
       
       const fadeIn = document.getElementById('prefFadeIn').checked;
-      document.getElementById('fadeInBadge').innerText = fadeIn ? 'Aktiviert' : 'Deaktiviert';
-      document.getElementById('fadeInBadge').className = fadeIn ? 'text-xs px-2 py-0.5 rounded bg-brand-500/10 text-brand-400 font-mono' : 'text-xs px-2 py-0.5 rounded bg-zinc-800 text-zinc-500 font-mono';
+      const pct = parseInt(document.getElementById('prefFadeInPct').value, 10);
+      document.getElementById('fadeInBadge').innerText = (fadeIn && pct > 0) ? (pct + '% Aktiviert') : 'Deaktiviert';
+      document.getElementById('fadeInBadge').className = (fadeIn && pct > 0) ? 'text-xs px-2 py-0.5 rounded bg-brand-500/10 text-brand-400 font-mono' : 'text-xs px-2 py-0.5 rounded bg-zinc-800 text-zinc-500 font-mono';
+    }
+
+    function updateFadeInPctConfig() {
+      const pct = parseInt(document.getElementById('prefFadeInPct').value, 10);
+      document.getElementById('fadeInPctVal').innerText = pct + '% der Trackdauer';
+      if (pct === 0) {
+        document.getElementById('prefFadeIn').checked = false;
+      } else if (!document.getElementById('prefFadeIn').checked) {
+        document.getElementById('prefFadeIn').checked = true;
+      }
+      updateSimConfig();
     }
 
     function togglePlayback() {
@@ -356,13 +365,16 @@
       document.getElementById('simArt').innerText = t.icon;
       document.getElementById('durationText').innerText = '0:20';
 
-      const fadeInEnabled = document.getElementById('prefFadeIn').checked;
+      const fadeInCheckbox = document.getElementById('prefFadeIn').checked;
+      const fadeInPct = parseInt(document.getElementById('prefFadeInPct').value, 10);
+      const fadeInEnabled = fadeInCheckbox && fadeInPct > 0;
+
       if (fadeInEnabled) {
         currentVolume = 0.0;
-        document.getElementById('simStatus').innerText = 'Dynamisches Fade-In (0% -> 100%)...';
+        document.getElementById('simStatus').innerText = 'Dynamisches Fade-In (0% -> 100% über ' + fadeInPct + '%)...';
       } else {
         currentVolume = 1.0;
-        document.getElementById('simStatus').innerText = 'Wiedergabe...';
+        document.getElementById('simStatus').innerText = 'Wiedergabe (100% Lautstärke)...';
       }
       updateVolumeUI();
 
@@ -376,11 +388,11 @@
         }
 
         trackElapsed += 0.05;
-        const fadeInDuration = Math.max(1.0, trackDuration * 0.05);
+        const fadeInDuration = (trackDuration * (fadeInPct / 100.0));
 
         if (fadeInEnabled && trackElapsed < fadeInDuration) {
           currentVolume = Math.min(1.0, trackElapsed / fadeInDuration);
-          document.getElementById('simStatus').innerText = 'Dynamisches Fade-In (erste 5%)...';
+          document.getElementById('simStatus').innerText = 'Dynamisches Fade-In (' + fadeInPct + '%)...';
         } else {
           currentVolume = 1.0;
           if (trackElapsed >= fadeInDuration && trackElapsed < trackDuration) {

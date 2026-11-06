@@ -35,7 +35,7 @@
 
         <SeekBarPreference
             android:defaultValue="10"
-            android:max="60"
+            android:max="240"
             app:min="1"
             app:showSeekBarValue="true"
             app:dependency="@string/set_key_random_pause"
@@ -48,6 +48,16 @@
             app:key="@string/set_key_dynamic_fade_in"
             app:summary="@string/set_dynamic_fade_in_desc"
             app:title="@string/set_dynamic_fade_in" />
+
+        <SeekBarPreference
+            android:defaultValue="5"
+            android:max="100"
+            app:min="0"
+            app:showSeekBarValue="true"
+            app:dependency="@string/set_key_dynamic_fade_in"
+            app:key="@string/set_key_dynamic_fade_in_percent"
+            app:summary="@string/set_dynamic_fade_in_percent_desc"
+            app:title="@string/set_dynamic_fade_in_percent" />
 
     </PreferenceCategory>
 

@@ -310,10 +310,12 @@
     <string name="set_random_pause">Zufällige Pausen zwischen Tracks</string>
     <string name="set_random_pause_desc">Fügt eine zufällige Pause ein, bevor der nächste Song startet</string>
     <string name="set_random_pause_duration">Maximale Pausendauer</string>
-    <string name="set_random_pause_duration_desc">Maximale Pausendauer in Sekunden (1–60s)</string>
+    <string name="set_random_pause_duration_desc">Maximale Pausendauer in Sekunden (1–240s)</string>
 
     <string name="set_dynamic_fade_in">Dynamisches Fade-In</string>
-    <string name="set_dynamic_fade_in_desc">Blendet die Lautstärke über die ersten 5% des Tracks sanft ein</string>
+    <string name="set_dynamic_fade_in_desc">Blendet die Lautstärke zu Beginn des Tracks sanft ein</string>
+    <string name="set_dynamic_fade_in_percent">Fade-In Dauer (Prozent)</string>
+    <string name="set_dynamic_fade_in_percent_desc">Länge der Einblendung in Prozent der Tracklänge (0–100%, 0% deaktiviert)</string>
     <string name="set_replay_gain">Volume normalization</string>
     <string name="set_replay_gain_mode">ReplayGain strategy</string>
     <string name="set_replay_gain_mode_off">Off</string>
